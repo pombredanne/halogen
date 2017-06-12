@@ -49,10 +49,23 @@ def test_constant_href():
 
         """A test schema."""
 
-        warehouse = halogen.Link("/test/123")
+        warehouse = halogen.Link("/test/123", deprecation="http://foo.bar")
 
     assert Schema.serialize({}) == {
         "_links": {
-            "warehouse": {"href": "/test/123"},
+            "warehouse": {"deprecation": "http://foo.bar", "href": "/test/123"},
         }
     }
+
+
+def test_attr_decorator_getter():
+    """Test attribute as a decorator getter."""
+
+    class Schema(halogen.Schema):
+
+        @halogen.attr()
+        def total(obj):
+            return 123
+
+    data = Schema.serialize({"total": 555})
+    assert data["total"] == 123

@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-"""Setup functionality for the Halogen library."""
+"""Setuptools entry point."""
 import codecs
 import sys
 from os.path import abspath, dirname, join
@@ -7,23 +6,47 @@ from os.path import abspath, dirname, join
 from setuptools import setup
 from setuptools.command.test import test as TestCommand
 
+import halogen
+
+install_requires = [
+    'cached-property',
+    'isodate',
+    'python-dateutil',
+    'pytz',
+    'six',
+]
+
+try:
+    from collections import OrderedDict # noqa
+except ImportError:  # pragma: no cover
+    install_requires.append('ordereddict')
+
 
 class ToxTestCommand(TestCommand):
 
     """Test command which runs tox under the hood."""
 
+    user_options = [('tox-args=', 'a', "Arguments to pass to tox")]
+
+    def initialize_options(self):
+        """Initialize options and set their defaults."""
+        TestCommand.initialize_options(self)
+        self.tox_args = '--recreate'
+
     def finalize_options(self):
         """Add options to the test runner (tox)."""
         TestCommand.finalize_options(self)
-        self.test_args = ['--recreate']
+        self.test_args = []
         self.test_suite = True
 
     def run_tests(self):
         """Invoke the test runner (tox)."""
         # import here, cause outside the eggs aren't loaded
-        import detox.main
-        errno = detox.main.main(self.test_args)
+        import tox
+        import shlex
+        errno = tox.cmdline(args=shlex.split(self.tox_args))
         sys.exit(errno)
+
 
 long_description = []
 
@@ -35,11 +58,11 @@ setup(
     name="halogen",
     description="Python HAL generation/parsing library",
     long_description='\n'.join(long_description),
-    author="Paylogic International",
+    author="Oleg Pidsadnyi, Paylogic International and others",
     license="MIT license",
     author_email="developers@paylogic.com",
     url="https://github.com/paylogic/halogen",
-    version="0.1.2",
+    version=halogen.__version__,
     classifiers=[
         "Development Status :: 6 - Mature",
         "Intended Audience :: Developers",
@@ -51,9 +74,12 @@ setup(
         "Topic :: Software Development :: Libraries",
         "Topic :: Utilities",
         "Programming Language :: Python :: 2",
-        "Programming Language :: Python :: 3"
-    ] + [("Programming Language :: Python :: %s" % x) for x in "2.6 2.7 3.4".split()],
+        "Programming Language :: Python :: 2.7",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.4",
+    ],
     cmdclass={"test": ToxTestCommand},
     packages=["halogen"],
-    tests_require=["detox"],
+    install_requires=install_requires,
+    tests_require=["tox"],
 )

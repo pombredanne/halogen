@@ -1,17 +1,18 @@
 halogen
 =======
 
-.. image:: https://api.travis-ci.org/paylogic/halogen.png
-   :target: https://travis-ci.org/paylogic/halogen
-
-.. image:: https://pypip.in/v/halogen/badge.png
-   :target: https://crate.io/packages/halogen/
-
-.. image:: https://coveralls.io/repos/paylogic/halogen/badge.png?branch=master
-   :target: https://coveralls.io/r/paylogic/halogen
-
-
 Python HAL generation/parsing library.
+
+.. image:: http://img.shields.io/pypi/v/halogen.svg
+   :target: https://pypi.python.org/pypi/halogen
+.. image:: http://img.shields.io/coveralls/paylogic/halogen/master.svg
+   :target: https://coveralls.io/r/paylogic/halogen
+.. image:: https://travis-ci.org/paylogic/halogen.svg?branch=master
+    :target: https://travis-ci.org/paylogic/halogen
+.. image:: https://readthedocs.org/projects/halogen/badge/?version=latest
+    :alt: Documentation Status
+    :scale: 100%
+    :target: https://readthedocs.org/projects/halogen/
 
 Halogen takes the advantage of the declarative style serialization with easily extendable schemas.
 Schema combines the knowledge about your data model, attribute mapping and advanced accessing, with
@@ -19,6 +20,7 @@ complex types and data transformation.
 
 Library is purposed in representing your data in HAL format in the most obvious way possible, but also
 of the generic web form-like functionality so that your schemas and types can be reused as much as possible.
+
 
 Schema
 ======
@@ -36,6 +38,7 @@ Serialization
     >>> {"hello": "Hello World"}
 
 Simply call Schema.serialize() class method which can accept dict or any other object.
+
 
 Validation
 ----------
@@ -140,11 +143,13 @@ Result:
         "name": "Abra Cadabra"
     }
 
+
 Attribute
 ---------
 
 Attributes form the schema and encapsulate the knowledge how to get the data from your model,
 how to transform it according to the specific type.
+
 
 Attr()
 ~~~~~~
@@ -221,6 +226,7 @@ Result:
     }
 
 In some cases also the ``attr`` can be specified to be a callable that returns a constant value.
+
 
 Attr(attr="foo")
 ~~~~~~~~~~~~~~~~
@@ -304,6 +310,33 @@ Result:
         "name": "Abra Cadabra"
     }
 
+
+Attribute as a decorator
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Sometimes accessor functions are too big for lambdas. In this case it is possible
+to decorate a method of the class to be a getter accessor.
+
+
+.. code-block:: python
+
+    import halogen
+
+    class ShoppingCartSchema(halogen.Schema):
+        
+        @halogen.attr(AmountType(), default=None)
+        def total(obj):
+            return sum(
+                (item.amount for item in obj.items),
+                0,
+            )
+
+        @total.setter
+        def set_total(obj, value):
+            obj.total = value
+
+
+
 Attr(attr=Acccessor)
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -311,7 +344,6 @@ In case the schema is used for both directions to serialize and to deserialize t
 can be passed with both ``getter`` and ``setter`` specified.
 ``Getter`` is a string or callable in order to get the value from a model, and ``setter`` is a string or callable
 that knows where the deserialized value should be stored.
-
 
 
 Attr(Type())
@@ -366,6 +398,33 @@ Result:
         "title": "Harry Potter and the Philosopher's Stone"
     }
 
+Attr(Type(validators=[validator]))
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Type gets optional ``validators`` parameter, which is a list of ``halogen.validators.Validator`` objects whose single
+interface method ``validate`` will be called for the given value during the deserialization. If the value is not valid,
+``halogen.exceptions.ValidationError`` should be raised.
+Halogen provides basic validators, for example ``halogen.validators.Range`` to validate that the values is in certain
+range.
+
+
+Attr(default=value)
+~~~~~~~~~~~~~~~~~~~
+
+If an attribute cannot be taken, provided ``default`` value will be used; if ``default`` value is
+a callable, it will be called to get the default value.
+
+
+Attr(required=False)
+~~~~~~~~~~~~~~~~~~~~
+
+By default, attributes are required, so when an attribute can not be taken during the serialization and ``default``
+is not provided, an exception will be raised (``AttributeError`` or ``KeyError``, depending on the input).
+It's possible to relax this restriction by passing ``required=False`` to the attribute constructor.
+For deserialization, the same logic applies, but the exception type will be ``halogen.exceptions.ValidationError``
+for human readability (see Deserialization_).
+
+
 Type
 ----
 
@@ -377,11 +436,13 @@ their constructors while declaring your schema.
 Types can raise ``halogen.exceptions.ValidationError`` during deserialization, but serialization
 expects the value that this type knows how to transform.
 
+
 Subclassing types
 ~~~~~~~~~~~~~~~~~
 
 Types that are common in your application can be shared between schemas. This could be the datetime type,
 specific URL type, internationalized strings and any other representation that requires specific format.
+
 
 Type.serialize
 ~~~~~~~~~~~~~~
@@ -447,6 +508,7 @@ HAL
 
 Hypertext Application Language.
 
+
 RFC
 ---
 
@@ -454,12 +516,14 @@ The JSON variant of HAL (application/hal+json) has now been published as an inte
 
 .. _draft-kelly-json-hal: http://tools.ietf.org/html/draft-kelly-json-hal.
 
+
 Link
 ----
 
 Link objects at RFC: link-objects_
 
 .. _link-objects: http://tools.ietf.org/html/draft-kelly-json-hal-06#section-5
+
 
 href
 ----
@@ -469,26 +533,42 @@ The "href" property is REQUIRED.
 ``halogen.Link`` will create ``href`` for you. You just need to point to ``halogen.Link`` either from where or
 what ``halogen.Link`` should put into ``href``.
 
-1) Static variant
+Static variant
+    .. code-block:: python
 
-.. code-block:: python
+        import halogen
 
-    import halogen
+        class EventSchema(halogen.Schema):
 
-    class EventSchema(halogen.Schema):
+            artist = halogen.Link(attr="/artists/some-artist")
 
-        artist = halogen.Link(attr="/artists/some-artist")
+Callable variant
+    .. code-block:: python
+
+        import halogen
+
+        class EventSchema(halogen.Schema):
+
+            help = halogen.Link(attr=lambda: current_app.config['DOC_URL'])
+
+deprecation
+-----------
+
+Links can be deprecated by specifying the deprecation URL attribute which points to the document
+describing the deprecation.
 
 
-2) Callable variant
+    .. code-block:: python
 
-.. code-block:: python
+        import halogen
 
-    import halogen
+        class EventSchema(halogen.Schema):
 
-    class EventSchema(halogen.Schema):
+            artist = halogen.Link(
+                attr="/artists/some-artist",
+                deprecation="http://docs.api.com/deprecations#artist",
+            )
 
-        help = halogen.Link(attr=lambda: current_app.config['DOC_URL'])
 
 CURIE
 ~~~~~
@@ -574,7 +654,7 @@ Example:
     em = halogen.Curie(
         name="em",
         href="https://docs.event-manager.com/{rel}.html",
-        templated=true,
+        templated=True,
         type="text/html"
     )
 
@@ -669,6 +749,33 @@ Result:
         }
     }
 
+By default, embedded resources are required, you can make them not required by passing ``required=False`` to the
+constructor, and empty values will be omitted in the serialization:
+
+.. code-block:: python
+
+    import halogen
+
+    class Schema(halogen.Schema):
+        user1 = halogen.Embedded(PersonSchema, required=False)
+        user2 = halogen.Embedded(PersonSchema)
+
+    serialized = Schema.serialize({'user2': Person("John", "Smith")})
+
+Result:
+
+.. code-block:: json
+
+    {
+        "_embedded": {
+            "user2": {
+                "name": "John",
+                "surname": "Smith"
+            }
+        }
+    }
+
+
 Deserialization
 ===============
 
@@ -685,7 +792,7 @@ Example:
         hello = halogen.Attr()
 
     result = Hello.deserialize({"hello": "Hello World"})
-    print result
+    print(result)
 
 Result:
 
@@ -716,13 +823,14 @@ Example:
 
 
     Hello.deserialize({"hello": "Hello World"}, hello_message)
-    print hello_message.hello
+    print(hello_message.hello)
 
 Result:
 
 .. code-block:: python
 
     "Hello World"
+
 
 Type.deserialize
 ----------------
@@ -773,11 +881,150 @@ Example:
 
 
     product = ProductSchema.deserialize({"title": "Pencil", "price": {"currency": "EUR", "amount": 0.30}})
-    print product
+    print(product)
 
 
-Resource:
+Result:
 
 .. code-block:: python
 
     {"price": Amount: EUR 0.3, "title": "Pencil"}
+
+
+Deserialization validation errors
+---------------------------------
+
+On deserialization failure, halogen raises special exception (``halogen.exceptions.ValidationError``).
+That exception class has ``__unicode__`` method which  renders human readable error result so user can easily track
+down the problem with his input.
+
+
+Example:
+
+.. code-block:: python
+
+    import halogen
+
+    class Hello(halogen.Schema):
+        hello = halogen.Attr()
+
+    try:
+        result = Hello.deserialize({})
+    except halogen.exceptions.ValidationError as exc:
+        print(exc)
+
+Result:
+
+.. code-block:: python
+
+    {
+        "errors": [
+            {
+                "errors": [
+                        {
+                            "type": "str",
+                            "error": "Missing attribute."
+                        }
+                    ],
+                "attr": "hello"
+            }
+        ],
+        "attr": "<root>"
+    }
+
+
+In case when you have nested schemas, and use ``List``, halogen also adds the index (counting from 0) in the list
+so you see where exactly the validation error happened.
+
+
+Example:
+
+.. code-block:: python
+
+    import halogen
+
+    class Product(halogen.Schema):
+
+        """A product has a name and quantity."""
+
+        name = halogen.Attr()
+        quantity = halogen.Attr()
+
+
+    class NestedSchema(halogen.Schema):
+
+        """An example nested schema."""
+
+        products = halogen.Attr(
+            halogen.types.List(
+                Product,
+            ),
+            default=[],
+        )
+
+    try:
+        result = NestedSchema.deserialize({
+            "products": [
+                {
+                    "name": "name",
+                    "quantity": 1
+                },
+                {
+                    "name": "name",
+                }
+
+            ]
+        })
+    except halogen.exceptions.ValidationError as exc:
+        print(exc)
+
+Result:
+
+.. code-block:: python
+
+    {
+        "errors": [
+            {
+                "errors": [
+                    {
+                        "index": 1,
+                        "errors": [
+                            {
+                                "errors": [
+                                    {
+                                        "type": "str",
+                                        "error": "Missing attribute."
+                                    }
+                                ],
+                                "attr": "quantity"
+                            }
+                        ]
+                    }
+                ],
+                "attr": "products"
+            }
+        ],
+        "attr": "<root>"
+    }
+
+Note that should ``ValueError`` exception happen on the attribute deserialization, it will be caught and reraized
+as ``halogen.exceptions.ValidationError``. This is to eliminate the need of raising halogen specific exceptions in
+types and attributes during the deserialization.
+
+
+Contact
+-------
+
+If you have questions, bug reports, suggestions, etc. please create an issue on
+the `GitHub project page <http://github.com/paylogic/halogen>`_.
+
+
+License
+-------
+
+This software is licensed under the `MIT license <http://en.wikipedia.org/wiki/MIT_License>`_
+
+See `License file <https://github.com/paylogic/halogen/blob/master/LICENSE.txt>`_
+
+
+© 2013 Oleg Pidsadnyi, Paylogic International and others.

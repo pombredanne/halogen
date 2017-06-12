@@ -3,28 +3,36 @@
 import sys
 import inspect
 
+try:
+    from collections import OrderedDict
+except ImportError:  # pragma: no cover
+    from ordereddict import OrderedDict  # noqa
+
+from cached_property import cached_property
+
 from halogen import types
 from halogen import exceptions
 
 PY2 = sys.version_info[0] == 2
 
-if not PY2:
+if not PY2:  # pragma: no cover
     string_types = (str,)
-else:
+else:  # pragma: no cover
     string_types = (str, unicode)
 
 
-BYPASS = lambda value: value
+def BYPASS(value):
+    """Bypass getter."""
+    return value
 
 
-def _get_context(func, kwargs):
+def _get_context(argspec, kwargs):
     """Prepare a context for the serialization.
 
-    :param func: Function which needs or does not need kwargs.
+    :param argspec: The argspec of the serialization function.
     :param kwargs: Dict with context
     :return: Keywords arguments that function can accept.
     """
-    argspec = inspect.getargspec(func)
     if argspec.keywords is not None:
         return kwargs
     return dict((arg, kwargs[arg]) for arg in argspec.args if arg in kwargs)
@@ -39,6 +47,10 @@ class Accessor(object):
         self.getter = getter
         self.setter = setter
 
+    @cached_property
+    def _getter_argspec(self):
+        return inspect.getargspec(self.getter)
+
     def get(self, obj, **kwargs):
         """Get an attribute from a value.
 
@@ -47,7 +59,7 @@ class Accessor(object):
         """
         assert self.getter is not None, "Getter accessor is not specified."
         if callable(self.getter):
-            return self.getter(obj, **_get_context(self.getter, kwargs))
+            return self.getter(obj, **_get_context(self._getter_argspec, kwargs))
 
         assert isinstance(self.getter, string_types), "Accessor must be a function or a dot-separated string."
 
@@ -89,7 +101,7 @@ class Accessor(object):
 
     def __repr__(self):
         """Accessor representation."""
-        return "<{0} getter='{1}', setter='{1}'>".format(
+        return "<{0} getter='{1}', setter='{2}'>".format(
             self.__class__.__name__,
             self.getter,
             self.setter,
@@ -99,6 +111,8 @@ class Accessor(object):
 class Attr(object):
 
     """Schema attribute."""
+
+    creation_counter = 0
 
     def __init__(self, attr_type=None, attr=None, required=True, **kwargs):
         """Attribute constructor.
@@ -114,6 +128,9 @@ class Attr(object):
         if "default" in kwargs:
             self.default = kwargs["default"]
 
+        self.creation_counter = Attr.creation_counter
+        Attr.creation_counter += 1
+
     @property
     def compartment(self):
         """The key of the compartment this attribute will be placed into (for example: _links or _embedded)."""
@@ -124,7 +141,7 @@ class Attr(object):
         """The key of the this attribute will be placed into (within it's compartment)."""
         return self.name
 
-    @property
+    @cached_property
     def accessor(self):
         """Get an attribute's accessor with the getter and the setter.
 
@@ -138,6 +155,10 @@ class Attr(object):
 
         attr = self.attr or self.name
         return Accessor(getter=attr, setter=attr)
+
+    @cached_property
+    def _attr_type_serialize_argspec(self):
+        return inspect.getargspec(self.attr_type.serialize)
 
     def serialize(self, value, **kwargs):
         """Serialize the attribute of the input data.
@@ -158,7 +179,7 @@ class Attr(object):
                     raise
                 value = self.default() if callable(self.default) else self.default
 
-            return self.attr_type.serialize(value, **_get_context(self.attr_type.serialize, kwargs))
+            return self.attr_type.serialize(value, **_get_context(self._attr_type_serialize_argspec, kwargs))
 
         return self.attr_type
 
@@ -181,12 +202,10 @@ class Attr(object):
 
         try:
             value = self.accessor.get(compartment)
-        except KeyError:
-            if hasattr(self, "default"):
-                value = self.default
-            else:
+        except (KeyError, AttributeError):
+            if not hasattr(self, "default") and self.required:
                 raise
-
+            return self.default() if callable(self.default) else self.default
         return self.attr_type.deserialize(value)
 
     def __repr__(self):
@@ -196,12 +215,44 @@ class Attr(object):
             self.name,
         )
 
+    def setter(self, setter):
+        """Set an attribute setter accessor function.
+
+        Can be used as a decorator:
+            @total.setter
+            def set_total(obj, value):
+                obj.total = value
+        """
+        self.accessor.setter = setter
+
+    def __call__(self, getter):
+        """Decorate a getter accessor function."""
+        self.name = getter.__name__
+        self.accessor.getter = getter
+        return self
+
+
+def attr(*args, **kwargs):
+    """Attribute as a decorator alias.
+
+    Decorates the getter function like:
+
+        @halogen.attr(AmountType(), default=None)
+        def total(obj):
+            return sum((item.amount for item in obj.items), 0)
+
+    This is identical to using attr with a lambda, but more practical in case of larger functions:
+        total = halogen.Attr(AmountType(), default=None, attr=lambda obj: sum((item.amount for item in obj.items), 0))
+    """
+    return Attr(*args, **kwargs)
+
 
 class Link(Attr):
 
     """Link attribute of a schema."""
 
-    def __init__(self, attr_type=None, attr=None, key=None, required=True, curie=None, templated=None, type=None):
+    def __init__(self, attr_type=None, attr=None, key=None, required=True,
+                 curie=None, templated=None, type=None, deprecation=None):
         """Link constructor.
 
         :param attr_type: Type, Schema or constant that does the type conversion of the attribute.
@@ -210,6 +261,7 @@ class Link(Attr):
         :param required: Is this link required to be present.
         :param curie: Link namespace prefix (e.g. "<prefix>:<name>") or Curie object.
         :param templated: Is this link templated.
+        :param deprecation: Link deprecation URL.
         :param type: Its value is a string used as a hint to indicate the media type expected when dereferencing
                            the target resource.
         """
@@ -221,6 +273,7 @@ class Link(Attr):
             attrs = {
                 'templated': templated,
                 'type': type,
+                'deprecation': deprecation,
             }
 
             class LinkSchema(Schema):
@@ -231,6 +284,9 @@ class Link(Attr):
 
                 if attrs['type'] is not None:
                     type = Attr(attr=lambda value: type)
+
+                if attrs['deprecation'] is not None:
+                    deprecation = Attr(attr=lambda value: deprecation)
 
             attr_type = LinkSchema
 
@@ -301,14 +357,14 @@ class Embedded(Attr):
 
     """Embedded attribute of schema."""
 
-    def __init__(self, attr_type=None, attr=None, curie=None):
+    def __init__(self, attr_type=None, attr=None, curie=None, required=True):
         """Embedded constructor.
 
         :param attr_type: Type, Schema or constant that does the type conversion of the attribute.
         :param attr: Attribute name, dot-separated attribute path or an `Accessor` instance.
         :param curie: The curie used for this embedded attribute.
         """
-        super(Embedded, self).__init__(attr_type, attr)
+        super(Embedded, self).__init__(attr_type=attr_type, attr=attr, required=required)
         self.curie = curie
 
     @property
@@ -331,28 +387,29 @@ class _Schema(types.Type):
     def __new__(cls, **kwargs):
         """Create schema from keyword arguments."""
         schema = type("Schema", (cls, ), {"__doc__": cls.__doc__})
-        schema.__class_attrs__ = []
-        schema.__attrs__ = []
+        schema.__class_attrs__ = OrderedDict()
+        schema.__attrs__ = OrderedDict()
         for name, attr in kwargs.items():
             if not hasattr(attr, "name"):
                 attr.name = name
-            schema.__class_attrs__.append(attr)
-            schema.__attrs__.append(attr)
+            schema.__class_attrs__[attr.name] = attr
+            schema.__attrs__[attr.name] = attr
         return schema
 
     @classmethod
     def serialize(cls, value, **kwargs):
-        result = {}
-        for attr in cls.__attrs__:
+        result = OrderedDict()
+        for attr in cls.__attrs__.values():
             compartment = result
             if attr.compartment is not None:
-                compartment = result.setdefault(attr.compartment, {})
+                compartment = result.setdefault(attr.compartment, OrderedDict())
             try:
                 compartment[attr.key] = attr.serialize(value, **kwargs)
             except (AttributeError, KeyError):
                 if attr.required:
                     raise
-
+            if attr.compartment is not None and len(compartment) == 0:
+                del result[attr.compartment]
         return result
 
     @classmethod
@@ -364,30 +421,31 @@ class _Schema(types.Type):
 
         :returns: Dict of deserialized value for attributes. Where key is name of schema's attribute and value is
         deserialized value from value dict.
+        :raises: ValidationError.
         """
         errors = []
         result = {}
-        for attr in cls.__attrs__:
+        for attr in cls.__attrs__.values():
             try:
                 result[attr.name] = attr.deserialize(value)
             except NotImplementedError:
                 # Links don't support deserialization
                 continue
+            except ValueError as e:
+                errors.append(exceptions.ValidationError(e, attr.name))
             except exceptions.ValidationError as e:
                 e.attr = attr.name
                 errors.append(e)
-            except KeyError:
+            except (KeyError, AttributeError):
                 if attr.required:
-                    e = exceptions.ValidationError("Missing attribute.", attr.name)
-                    e.attr = attr.name
-                    errors.append(e)
+                    errors.append(exceptions.ValidationError("Missing attribute.", attr.name))
 
         if errors:
             raise exceptions.ValidationError(errors)
 
         if output is None:
             return result
-        for attr in cls.__attrs__:
+        for attr in cls.__attrs__.values():
             if attr.name in result:
                 attr.accessor.set(output, result[attr.name])
 
@@ -398,22 +456,23 @@ class _SchemaType(type):
 
     def __init__(cls, name, bases, clsattrs):
         """Create a new _SchemaType."""
-        cls.__class_attrs__ = []
+        cls.__class_attrs__ = OrderedDict()
         curies = set([])
 
+        attrs = [(key, value) for key, value in clsattrs.items() if isinstance(value, Attr)]
+        attrs.sort(key=lambda attr: attr[1].creation_counter)
+
         # Collect the attributes and set their names.
-        for name, value in clsattrs.items():
-            if isinstance(value, Attr):
+        for name, attr in attrs:
+            delattr(cls, name)
+            cls.__class_attrs__[name] = attr
+            if not hasattr(attr, "name"):
+                attr.name = name
 
-                delattr(cls, name)
-                cls.__class_attrs__.append(value)
-                if not hasattr(value, "name"):
-                    value.name = name
-
-                if isinstance(value, (Link, Embedded)):
-                    curie = getattr(value, "curie", None)
-                    if curie is not None:
-                        curies.add(curie)
+            if isinstance(attr, (Link, Embedded)):
+                curie = getattr(attr, "curie", None)
+                if curie is not None:
+                    curies.add(curie)
 
         # Collect CURIEs and create the link attribute
 
@@ -430,11 +489,11 @@ class _SchemaType(type):
             )
             link.name = "curies"
 
-            cls.__class_attrs__.append(link)
+            cls.__class_attrs__[link.name] = link
 
-        cls.__attrs__ = []
+        cls.__attrs__ = OrderedDict()
         for base in reversed(cls.__mro__):
-            cls.__attrs__.extend(getattr(base, "__class_attrs__", []))
+            cls.__attrs__.update(getattr(base, "__class_attrs__", OrderedDict()))
 
 
 Schema = _SchemaType("Schema", (_Schema, ), {"__doc__": _Schema.__doc__})

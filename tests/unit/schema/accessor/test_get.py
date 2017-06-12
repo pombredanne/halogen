@@ -32,7 +32,7 @@ def test_get_object_callable(basic_object_value, basic_object):
     assert acc.get(basic_object) == basic_object_value
 
 
-def test_get_object_callable_called(mocked_get_context, basic_object):
+def test_get_object_callable_called(mocked_inspect_getargspec, basic_object):
     """Test if Accessor.get() calls Accessor.getter() if getter is callable."""
     acc = Accessor()
     acc.getter = mock.Mock()
@@ -82,7 +82,7 @@ def test_get_dict_string(basic_dict_value, basic_dict):
 @pytest.mark.parametrize(
     "basic_object_value",
     [
-        {"key": {"key": "value"}},
+        {"key": {"key": lambda: "value"}},
         {"key": Obj(key="value")},
         Obj(key={"key": "value"}),
         Obj(key=Obj(key="value")),
